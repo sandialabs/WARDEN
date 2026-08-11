@@ -408,10 +408,6 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                                               line={'color': 'red'},
                                               hoverinfo='skip'))
 
-                    # add vertical lines for annotations
-                    for _, elem in dff_path[['date', 'note']].iterrows():
-                        if not pd.isna(elem['note']):
-                            plot.add_vline(x=elem['date'], line_width=1, line_dash='dot', line_color='green')
                 else:
 
                     # add graph for second dataset
@@ -429,6 +425,18 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                                                              "Note: %{customdata[1]}<extra></extra>"),
                                               showlegend=True,
                                               customdata=second_dff_path[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
+
+                # add vertical lines for annotations
+                for _, elem in dff_path[['date', 'note']].iterrows():
+                    if not pd.isna(elem['note']):
+                        plot.add_vline(x=elem['date'], line_width=1, line_dash='dot', line_color='green')
+
+                if have_second_dataset:
+
+                    # add vertical lines for annotations
+                    for _, elem in second_dff_path[['date', 'note']].iterrows():
+                        if not pd.isna(elem['note']):
+                            plot.add_vline(x=elem['date'], line_width=1, line_dash='dot', line_color='purple')
 
                 # determine y range
                 MARGIN = 0.1
