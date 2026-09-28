@@ -11,6 +11,7 @@ from pandas.tseries.offsets import *
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, date
 import time
+import textwrap
 from urllib.parse import urlparse, parse_qs
 from dash_extensions.enrich import (
     DashProxy,
@@ -46,6 +47,35 @@ class LoggingTimer:
 
     def __del__(self):
         logger.info(self.name+" " + str(self.elapsed))
+
+
+def wrap_title(path, wrap_title_length=55, max_title_lines=4):
+    '''
+    Wrap a path into at most max_title_lines lines of wrap_title_length characters
+    for a plot title, breaking at ' / ' where possible. Longer titles end in '...'.
+    '''
+    path_parts = path.split(' / ')
+    title_lines = []
+    title_line = ''
+    for path_part in path_parts:
+        wrapped_parts = textwrap.wrap(path_part,
+                                      width=wrap_title_length,
+                                      break_long_words=True,
+                                      break_on_hyphens=True) or ['']
+        next_title_line = f'{title_line} / {wrapped_parts[0]}' if title_line else wrapped_parts[0]
+        if title_line and len(next_title_line) > wrap_title_length:
+            title_lines.append(title_line)
+            title_line = wrapped_parts[0]
+        else:
+            title_line = next_title_line
+        for wrapped_part in wrapped_parts[1:]:
+            title_lines.append(title_line)
+            title_line = wrapped_part
+    title_lines.append(title_line)
+    if len(title_lines) > max_title_lines:
+        title_lines = title_lines[:max_title_lines]
+        title_lines[-1] = f'{title_lines[-1][:wrap_title_length - 3].rstrip()}...'
+    return '<br>'.join(title_lines)
 
 
 config = loadConfig("config.yaml")
@@ -366,7 +396,6 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                                   key=lambda x: natural_sorting(x))
 
         counter = 0
-        truncate_title_length = 43
         list_of_graphs = []
         with LoggingTimer("TIMER FOR graph_creator()::ForLoop:"):
             for path in unique_paths:
@@ -442,16 +471,21 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                     if np.isfinite(ymax2):
                         ymax = max(ymax, ymax2)
 
-                # Truncate the path for ease of reading
-                truncated_path = path
+                # Wrap the path for ease of reading
+                wrapped_path = path
                 if len(previous_path) > 0:
-                    truncated_path = truncated_path[len(previous_path)+1:]
-                truncated_path = truncated_path if len(truncated_path) < truncate_title_length else f'...{truncated_path[-truncate_title_length:]}'
+                    wrapped_path = wrapped_path[len(previous_path)+1:]
+                wrapped_path = wrap_title(wrapped_path)
 
                 plot.update_layout(
                     title_font_size=12,
+                    title_automargin=False,
+                    title_x=0.5,
+                    title_xanchor='center',
+                    title_y=0.90,
+                    title_yanchor='top',
                     hoverlabel={'align': "left"},
-                    title_text=truncated_path,
+                    title_text=wrapped_path,
                     xaxis={'autorange': True, 'type': 'date'},
                     yaxis={'range': [ymin* (1-MARGIN), ymax * (1+MARGIN)], 'type': 'linear'}
                 )
