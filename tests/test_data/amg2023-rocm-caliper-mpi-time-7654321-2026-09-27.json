@@ -1,0 +1,39 @@
+{
+  "checkout": "Nightly",
+  "host": "tuolumne",
+  "benchmark": "amg2023",
+  "variant": "+rocm caliper=mpi,time",
+  "system_args": "gpumode=TPX",
+  "benchmark_version": "",
+  "status": "Pass",
+  "status_changed": false,
+  "run_exit_code": 0,
+  "changes": {
+    "available": true,
+    "application_changed": false,
+    "dependencies_changed": false,
+    "packages": [],
+    "application_spec_changed": false,
+    "experiment_spec_changed": false,
+    "system_spec_changed": false
+  },
+  "performance": {
+    "available": true,
+    "metric": "Avg time/rank",
+    "region": "main",
+    "value": 1.843276,
+    "regressed": false,
+    "baseline_value": 1.821904,
+    "threshold": 0.05,
+    "percent_deviation": 1.1730585146088899,
+    "regression_changed": false
+  },
+  "job": {
+    "name": "nightly_test_run: [tuolumne, llnl-elcapitan, amg2023, +rocm caliper=mpi,time, TPX, gpumode=TPX]",
+    "id": "7654321",
+    "url": "https://gitlab.example.com/benchpark/benchpark/-/jobs/7654321",
+    "pipeline_id": "1234567"
+  },
+  "date": "2026-09-27T08:00:12Z",
+  "gitSHA": "82cbde3c145ae0a271b36b7f8fb640d9dc2c269e"
+}

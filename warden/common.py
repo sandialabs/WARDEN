@@ -136,18 +136,10 @@ def parse_xml_file(filename, skipBefore=None, deletePrefix=None):
         print(f"Could not parse tree because of the following error: {e}")
         return []
 
-def parse_json_file(file_path, skipBefore=None):
+def parse_google_benchmark_json_data(json_data, skipBefore=None):
     """
-    Process the data of a single json file
+    Process Google Benchmark json data.
     """
-    json_data = None
-    with open(file_path, "r") as fj:
-        try:
-            json_data = json.load(fj)
-        except Exception as e:
-            print(f"Could not parse json because of the following error: {e}")
-            return []
-
     date_long = None
     date_short = None
     git_sha = None
@@ -184,6 +176,65 @@ def parse_json_file(file_path, skipBefore=None):
                                   number_of_slashes=0,
                                   has_children=False))
     return data_rows
+
+def parse_benchpark_json_data(json_data, skipBefore=None):
+    """
+    Process Benchpark CI job metadata json data.
+    """
+    date_long = None
+    date_short = None
+    git_sha = 'No metadata found'
+    if 'date' in json_data:
+        date_long = pd.to_datetime(json_data['date'], errors='coerce')
+        date_long = date_long.replace(tzinfo=None)
+        date_short = date_long.date()
+    if 'gitSHA' in json_data:
+        git_sha = json_data['gitSHA']
+
+    data_rows = []
+    performance = json_data['performance']
+    if not performance['available']:
+        return data_rows
+
+    path_parts = [
+        json_data['host'],
+        json_data['benchmark'],
+        json_data['variant'],
+    ]
+    if json_data['system_args']:
+        path_parts.append(json_data['system_args'])
+    path_parts += [performance['metric'], performance['region']]
+    readable_path = ' / '.join(path_parts)
+
+    data_rows.append(dict(date=date_long,
+                          measurement=float(performance['value']),
+                          gitSHA=git_sha,
+                          readable_path=readable_path,
+                          date_only=date_short,
+                          number_of_slashes=0,
+                          has_children=False))
+    return data_rows
+
+def parse_json_file(file_path, skipBefore=None):
+    """
+    Process the data of a single json file
+    """
+    json_data = None
+    with open(file_path, "r") as fj:
+        try:
+            json_data = json.load(fj)
+        except Exception as e:
+            print(f"Could not parse json because of the following error: {e}")
+            return []
+
+    if 'benchmarks' in json_data:
+        return parse_google_benchmark_json_data(json_data, skipBefore)
+    if 'performance' in json_data:
+        return parse_benchpark_json_data(json_data, skipBefore)
+
+    logger.warning(f"Skipping {file_path}: unrecognized JSON format "
+                   "(expected a 'benchmarks' or 'performance' key)")
+    return []
 
 def parse_file(file_path, benchmark_config, skipBefore=None, deletePrefix=None):
     """

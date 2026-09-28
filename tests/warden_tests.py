@@ -27,6 +27,9 @@ class test_file_parsing(unittest.TestCase):
                         {'date': date2, 'measurement': 0.0013659322159533078, 'gitSHA': '1d9649fd4', 'readable_path': 'KokkosBlas3_GEMM/m:1000/n:1000/k:1000/manual_time', 'date_only': date2.date(), 'number_of_slashes': 0},
                         {'date': date2, 'measurement': 0.001176069535117057, 'gitSHA': '1d9649fd4', 'readable_path': 'KokkosBlas3_GEMM/m:1000/n:1000/k:1000/manual_time', 'date_only': date2.date(), 'number_of_slashes': 0}]
 
+    date3 = to_datetime('2026-09-27 08:00:12')
+    gold_benchpark_report = [{'date': date3, 'measurement': 1.843276, 'gitSHA': '82cbde3c145ae0a271b36b7f8fb640d9dc2c269e', 'readable_path': 'tuolumne / amg2023 / +rocm caliper=mpi,time / gpumode=TPX / Avg time/rank / main', 'date_only': date3.date(), 'number_of_slashes': 0, 'has_children': False}]
+
     def test_parse_xml_file(self):
         parse_xml_file(data_dir/"non_existent.xml")
         parse_xml_file(data_dir/"empty.xml")
@@ -54,6 +57,11 @@ class test_file_parsing(unittest.TestCase):
             self.assertEqual(data_rows[idx]['number_of_slashes'], self.gold_json_report[idx]['number_of_slashes'])
             assert(data_rows[idx]["date"].tzinfo is None)
 
+    def test_parse_benchpark_json_file(self):
+        data_rows = parse_json_file(data_dir/"amg2023-rocm-caliper-mpi-time-7654321-2026-09-27.json", None)
+        self.assertEqual(data_rows, self.gold_benchpark_report)
+        assert(data_rows[0]["date"].tzinfo is None)
+
     def test_json_config(self):
         config = loadConfig(data_dir/"config_kokkoskernelsperf.yaml")
 
@@ -63,7 +71,7 @@ class test_file_parsing(unittest.TestCase):
         parseFiles([], pickleFile, data_dir, None)
         pickleFile.exists()
         df = readPickle(pickleFile)
-        self.assertEqual(len(df), 7+4)
+        self.assertEqual(len(df), 7+4+1)
         pickleFile.unlink(missing_ok=True)
 
 class test_data_updates(unittest.TestCase):
