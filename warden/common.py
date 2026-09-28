@@ -193,9 +193,6 @@ def parse_benchpark_json_data(json_data, skipBefore=None):
 
     data_rows = []
     performance = json_data['performance']
-    if not performance['available']:
-        return data_rows
-
     path_parts = [
         json_data['host'],
         json_data['benchmark'],
@@ -207,12 +204,14 @@ def parse_benchpark_json_data(json_data, skipBefore=None):
     readable_path = ' / '.join(path_parts)
 
     data_rows.append(dict(date=date_long,
-                          measurement=float(performance['value']),
+                          measurement=float(performance['value']) if performance['available'] else None,
                           gitSHA=git_sha,
                           readable_path=readable_path,
                           date_only=date_short,
                           number_of_slashes=0,
-                          has_children=False))
+                          has_children=False,
+                          status=json_data['status'],
+                          failure_reason=performance.get('reason', '')))
     return data_rows
 
 def parse_json_file(file_path, skipBefore=None):

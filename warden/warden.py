@@ -401,6 +401,15 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
             for path in unique_paths:
 
                 dff_path = dff[dff['readable_path'] == path]
+                dff_path_measurements = dff_path[dff_path['measurement'].notna()]
+
+                if have_second_dataset:
+                    second_dff_path = second_dff[second_dff["readable_path"] == path]
+                    second_dff_path_measurements = second_dff_path[second_dff_path['measurement'].notna()]
+
+                has_status = ('status' in dff_path and dff_path['status'].notna().any())
+                if have_second_dataset:
+                    has_status |= ('status' in second_dff_path and second_dff_path['status'].notna().any())
 
                 if dff_path['has_children'].any():
                     schrodingers_button = dbc.Button([html.I(className='fa fa-angle-down')], id={'type': 'generated-button', 'index': path})
@@ -410,24 +419,24 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                 plot = go.Figure()
 
                 # creating graph
-                plot.add_trace(go.Scatter(x=dff_path["date"],
-                                          y=dff_path["measurement"],
+                plot.add_trace(go.Scatter(x=dff_path_measurements["date"],
+                                          y=dff_path_measurements["measurement"],
                                           name=chosen_dset,
                                           mode="lines+markers",
-                                          marker={'color': ['red' if not pd.isna(a) else 'cornflowerblue' for a in dff_path['note']],
-                                                  'symbol': ['square' if not pd.isna(a) else 'circle' for a in dff_path['note']]},
+                                          marker={'color': ['red' if not pd.isna(a) else 'cornflowerblue' for a in dff_path_measurements['note']],
+                                                  'symbol': ['square' if not pd.isna(a) else 'circle' for a in dff_path_measurements['note']]},
                                           hovertemplate=("Date: %{x}<br>" +
                                                          "Measurement: %{y}<br>" +
                                                          "GitSHA: %{customdata[0]}<br>" +
                                                          "Note: %{customdata[1]}<extra></extra>"),
                                           meta={"path": path},
                                           showlegend=have_second_dataset,
-                                          customdata=dff_path[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
+                                          customdata=dff_path_measurements[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
 
                 if not have_second_dataset:
 
                     # adds the rolling average line
-                    df_for_avg = dff_path.copy()
+                    df_for_avg = dff_path_measurements.copy()
                     df_for_avg['rolling_average'] = df_for_avg['measurement'].rolling(window=10, min_periods=1).mean()
                     plot.add_trace(go.Scatter(x=df_for_avg['date'],
                                               y=df_for_avg['rolling_average'],
@@ -444,32 +453,50 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                 else:
 
                     # add graph for second dataset
-                    second_dff_path = second_dff[second_dff["readable_path"] == path]
-                    plot.add_trace(go.Scatter(x=second_dff_path["date"],
-                                              y=second_dff_path["measurement"],
+                    plot.add_trace(go.Scatter(x=second_dff_path_measurements["date"],
+                                              y=second_dff_path_measurements["measurement"],
                                               name=second_chosen_dset,
                                               mode="lines+markers",
-                                              marker={'color': ['yellow' if not pd.isna(a) else 'red' for a in second_dff_path['note']],
-                                                      'symbol': ['square' if not pd.isna(a) else 'circle' for a in second_dff_path['note']]},
+                                              marker={'color': ['yellow' if not pd.isna(a) else 'red' for a in second_dff_path_measurements['note']],
+                                                      'symbol': ['square' if not pd.isna(a) else 'circle' for a in second_dff_path_measurements['note']]},
                                               line={"color": 'red'},
                                               hovertemplate=("Date: %{x}<br>" +
                                                              "Measurement: %{y}<br>" +
                                                              "GitSHA: %{customdata[0]}<br>" +
                                                              "Note: %{customdata[1]}<extra></extra>"),
                                               showlegend=True,
-                                              customdata=second_dff_path[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
+                                              customdata=second_dff_path_measurements[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
+
+                if has_status:
+                    status_rows = dff_path[dff_path['measurement'].isna()].copy()
+                    if have_second_dataset:
+                        status_rows = pd.concat([status_rows, second_dff_path[second_dff_path['measurement'].isna()]])
+                    status_rows['color'] = status_rows['status'].map({'Build': 'orange', 'Run': 'red'}).fillna('gray')
+                    status_rows['display_status'] = status_rows['status'].replace({'Build': 'Build fail', 'Run': 'Run fail'})
+                    plot.add_shape(type='line', xref='paper', yref='y2',
+                                   x0=0, x1=1, y0=0, y1=0,
+                                   line_width=1, line_color='gray')
+                    plot.add_trace(go.Scatter(x=status_rows['date'],
+                                              y=[0] * len(status_rows),
+                                              yaxis='y2',
+                                              mode='markers',
+                                              marker={'color': status_rows['color'], 'size': 8},
+                                              showlegend=False,
+                                              hovertemplate=("Date: %{x}<br>" +
+                                                             "Status: %{customdata[4]}<br>" +
+                                                             "Note: %{customdata[5]}<extra></extra>"),
+                                              customdata=status_rows[["gitSHA", "truncated_note", "note", "prevGitSHA", "display_status", "failure_reason"]]))
 
                 # determine y range
                 MARGIN = 0.1
-                ymin = dff_path['measurement'].min()
-                ymax = dff_path['measurement'].max()
+                measurements = dff_path_measurements['measurement']
                 if have_second_dataset:
-                    ymin2 = second_dff_path['measurement'].min()
-                    ymax2 = second_dff_path['measurement'].max()
-                    if np.isfinite(ymin2):
-                        ymin = min(ymin, ymin2)
-                    if np.isfinite(ymax2):
-                        ymax = max(ymax, ymax2)
+                    measurements = pd.concat([measurements, second_dff_path_measurements['measurement']])
+                ymin = measurements.min()
+                ymax = measurements.max()
+                if not np.isfinite(ymin):
+                    ymin = 0
+                    ymax = 1
 
                 # Wrap the path for ease of reading
                 wrapped_path = path
@@ -487,8 +514,15 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                     hoverlabel={'align': "left"},
                     title_text=wrapped_path,
                     xaxis={'autorange': True, 'type': 'date'},
-                    yaxis={'range': [ymin* (1-MARGIN), ymax * (1+MARGIN)], 'type': 'linear'}
+                    yaxis={'range': [ymin * (1-MARGIN), ymax * (1+MARGIN)], 'type': 'linear'}
                 )
+                if has_status:
+                    plot.update_layout(
+                        xaxis={'autorange': True, 'type': 'date', 'anchor': 'free', 'position': 0},
+                        yaxis={'range': [ymin * (1-MARGIN), ymax * (1+MARGIN)], 'type': 'linear', 'domain': [0.18, 1]},
+                        yaxis2={'range': [-1, 1], 'domain': [0, 0.1], 'showticklabels': False,
+                                'showgrid': False, 'zeroline': False, 'fixedrange': True}
+                    )
 
                 # add to our list of graphs
                 list_of_graphs.append(
