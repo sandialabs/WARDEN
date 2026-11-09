@@ -128,7 +128,6 @@ app.layout = dmc.MantineProvider(
             dcc.Store(id='current-stored-depth', data=0),
             dcc.Store(id='previous-path', data= ''),
             dcc.Loading(dcc.Store(id='data-store'), fullscreen=True, type='dot'),
-            dcc.Loading(dcc.Store(id='second-data-store'), fullscreen=True, type='dot'),
             dcc.Location(id='url', refresh=False),
             dcc.Store(id='annotation-date-store'),
 
@@ -184,27 +183,16 @@ app.layout = dmc.MantineProvider(
 
             # Inputs
             html.Div([
-                html.H4('Which dataset?'),
+                html.H4('Which datasets?'),
                 dbc.InputGroup(
                     [
                         dcc.Dropdown(
                             options=possible_datasets,
-                            value=possible_datasets[0],
-                            id='dataset-selection',
-                            clearable=False,
-                            style={'width': 550, 'color': 'black'},
-                        )
-                    ],
-                    className='mx-5 mb-5',
-                ),
-                html.H4('Compared against which other dataset'),
-                dbc.InputGroup(
-                    [
-                        dcc.Dropdown(
-                            options=["None"]+possible_datasets,
-                            value="None",
-                            id='second-dataset-selection',
-                            clearable=False,
+                            value=[possible_datasets[0]],
+                            multi=True,
+                            debounce=True,
+                            id='datasets-selection',
+                            clearable=True,
                             style={'width': 550, 'color': 'black'},
                         )
                     ],
@@ -266,8 +254,7 @@ app.layout = dmc.MantineProvider(
 # Data and graph callbacks
 
 @app.callback(
-    Output(component_id='dataset-selection', component_property='value'),
-    Output(component_id='second-dataset-selection', component_property='value'),
+    Output(component_id='datasets-selection', component_property='value'),
     Output(component_id='do-display-btn', component_property='n_clicks'),
     Input('url', 'search')
 )
@@ -278,37 +265,28 @@ def update_dropdown_from_url(search):
     dataset = parsed_queries.get('dataset', [None])[0]
     if dataset is None or dataset not in possible_datasets:
         return no_update
-    second_dataset = parsed_queries.get('second_dataset', ["None"])[0]
-    if second_dataset != "None" and second_dataset not in possible_datasets:
-        return no_update
-    return (dataset, second_dataset, 0)
+    return (dataset, 0)
 
 
 @callback(
     Output(component_id='data-store', component_property='data'),
-    Output(component_id='second-data-store', component_property='data'),
     Output(component_id='current-stored-depth', component_property='data', allow_duplicate=True),
     Output(component_id='previous-path', component_property='data', allow_duplicate=True),
     
-    State(component_id='dataset-selection', component_property='value'),
-    State(component_id='second-dataset-selection', component_property='value'),
+    State(component_id='datasets-selection', component_property='value'),
     State(component_id='days-slider', component_property='value'),
     Input(component_id='do-display-btn', component_property='n_clicks'),
     Input(component_id='url', component_property='pathname'),
 )
-def select_dataset(val, val2, days, _, __):
-    with LoggingTimer(f"TIMER FOR select_dataset() for {val}:"):
-        pickleFile = path_to_pickles/f'{val}.hkl'
-        df = readPickle(pickleFile)
-        df = df[df['date'].values >= (df['date'].max() - timedelta(days=days))]
-    if val2 != "None":
-        with LoggingTimer(f"TIMER FOR select_dataset() for {val2}:"):
-            pickleFile = path_to_pickles/f'{val2}.hkl'
-            df2 = readPickle(pickleFile)
-            df2 = df2[df2['date'].values >= (df2['date'].max() - timedelta(days=days))]
-        return (Serverside(df), Serverside(df2), 0, '')
-    else:
-        return (Serverside(df), Serverside(None), 0, '')
+def select_dataset(vals, days, _, __):
+    dfs = []
+    for val in vals:
+        with LoggingTimer(f"TIMER FOR select_dataset() for {val}:"):
+            pickleFile = path_to_pickles/f'{val}.hkl'
+            df = readPickle(pickleFile)
+            df = df[df['date'].values >= (df['date'].max() - timedelta(days=days))]
+            dfs.append(df)
+    return (Serverside(dfs), 0, '')
 
 
 @callback(
@@ -316,13 +294,13 @@ def select_dataset(val, val2, days, _, __):
     Input(component_id={'type': 'generated-graph', 'index': ALL}, component_property='figure'),
     State(component_id='data-store', component_property='data')
 )
-def note_stopped_reporting(figs, df):
+def note_stopped_reporting(figs, dfs):
     missingDataWarningAfterDays = config["missingDataWarningAfterDays"]
     text_list = []
-    df['date'] = pd.to_datetime(df['date'])
+    dfs[0]['date'] = pd.to_datetime(dfs[0]['date'])
     for f in figs:
         f = go.Figure(f)
-        dff = df[df['readable_path'] == f['data'][0]['meta']['path']]
+        dff = dfs[0][dfs[0]['readable_path'] == f['data'][0]['meta']['path']]
         xmax = dff['date'].max()
         if xmax < pd.Timestamp(date.today()) - timedelta(days=missingDataWarningAfterDays):
             f.update_layout(
@@ -341,12 +319,10 @@ def note_stopped_reporting(figs, df):
     Input(component_id='current-stored-depth', component_property='data'),
     Input(component_id='previous-path', component_property='data'),
     Input(component_id='data-store', component_property='data'),
-    Input(component_id='second-data-store', component_property='data'),
-    State(component_id='dataset-selection', component_property='value'),
-    State(component_id='second-dataset-selection', component_property='value'),
+    State(component_id='datasets-selection', component_property='value'),
     prevent_initial_call='initial_duplicate'
 )
-def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_chosen_dset):
+def graph_creator(curr_depth, previous_path, dfs, chosen_dsets):
     '''
     This graph deals with actually making the graphs.
     It does the following things:
@@ -358,8 +334,7 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
         3. return 
     '''
 
-    have_second_dataset = (second_chosen_dset != "None")
-
+    dffs = []
     with LoggingTimer("TIMER FOR graph_creator():"):
         with LoggingTimer("TIMER FOR graph_creator()::load_annotations"):
             assert annotationsFile.exists()
@@ -375,56 +350,78 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
             mach_annot_df['truncated_note'] = mach_annot_df['note'].apply(truncate_text)
 
         with LoggingTimer("TIMER FOR graph_creator()::process_data"):
-            dff = df[df['number_of_slashes'] == curr_depth]
-            dff = dff[dff['readable_path'].str.startswith(previous_path)]
+            for setIdx in range(len(dfs)):
+                df = dfs[setIdx]
+                dff = df[df['number_of_slashes'] == curr_depth]
+                dff = dff[dff['readable_path'].str.startswith(previous_path)]
 
-            mach_annot_df_dataset = mach_annot_df[mach_annot_df['dataset_name'] == chosen_dset]
-            dff = pd.merge(dff, mach_annot_df_dataset[['date_only', 'note', 'truncated_note']], on='date_only', how='left')
+                mach_annot_df_dataset = mach_annot_df[mach_annot_df['dataset_name'] == chosen_dsets[setIdx]]
+                dffs.append(pd.merge(dff, mach_annot_df_dataset[['date_only', 'note', 'truncated_note']], on='date_only', how='left'))
 
-            if have_second_dataset:
-                second_dff = second_df[second_df['number_of_slashes'] == curr_depth]
-                second_dff = second_dff[second_dff['readable_path'].str.startswith(previous_path)]
+            # if have_second_dataset:
+            #     second_dff = second_df[second_df['number_of_slashes'] == curr_depth]
+            #     second_dff = second_dff[second_dff['readable_path'].str.startswith(previous_path)]
 
-                mach_annot_df_second_dataset = mach_annot_df[mach_annot_df['dataset_name'] == second_chosen_dset]
-                second_dff = pd.merge(second_dff, mach_annot_df_second_dataset[['date_only', 'note', 'truncated_note']], on='date_only', how='left')
+            #     mach_annot_df_second_dataset = mach_annot_df[mach_annot_df['dataset_name'] == second_chosen_dset]
+            #     second_dff = pd.merge(second_dff, mach_annot_df_second_dataset[['date_only', 'note', 'truncated_note']], on='date_only', how='left')
 
 
             def natural_sorting(s):
                 return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
 
-            unique_paths = sorted(dff['readable_path'].unique(),
+            unique_paths = sorted(dffs[0]['readable_path'].unique(),
                                   key=lambda x: natural_sorting(x))
 
         counter = 0
         list_of_graphs = []
+        MARGIN = 0.1
+        marker_list = ['circle', 'square', 'diamond', 'triangle-up', 'star', 'hourglass', 'cross-thin', 'x-thin', 'asterisk', 'hash']
+        color_list  = px.colors.qualitative.Plotly
+        del color_list[1]
         with LoggingTimer("TIMER FOR graph_creator()::ForLoop:"):
             for path in unique_paths:
-
-                dff_path = dff[dff['readable_path'] == path]
-
-                if dff_path['has_children'].any():
-                    schrodingers_button = dbc.Button([html.I(className='fa fa-angle-down')], id={'type': 'generated-button', 'index': path})
-                else:
-                    schrodingers_button = html.Div()
+                ymin = None
+                ymax = None
 
                 plot = go.Figure()
+                for setIdx in range(len(dfs)):
+                    dff = dffs[setIdx]
+                    dff_path = dff[dff['readable_path'] == path]
 
-                # creating graph
-                plot.add_trace(go.Scatter(x=dff_path["date"],
-                                          y=dff_path["measurement"],
-                                          name=chosen_dset,
-                                          mode="lines+markers",
-                                          marker={'color': ['red' if not pd.isna(a) else 'cornflowerblue' for a in dff_path['note']],
-                                                  'symbol': ['square' if not pd.isna(a) else 'circle' for a in dff_path['note']]},
-                                          hovertemplate=("Date: %{x}<br>" +
-                                                         "Measurement: %{y}<br>" +
-                                                         "GitSHA: %{customdata[0]}<br>" +
-                                                         "Note: %{customdata[1]}<extra></extra>"),
-                                          meta={"path": path},
-                                          showlegend=have_second_dataset,
-                                          customdata=dff_path[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
+                    if dff_path['has_children'].any():
+                        schrodingers_button = dbc.Button([html.I(className='fa fa-angle-down')], id={'type': 'generated-button', 'index': path})
+                    else:
+                        schrodingers_button = html.Div()
 
-                if not have_second_dataset:
+                    ymin = min(dff_path['measurement'].min(), ymin) if not (ymin==None) else dff_path['measurement'].min()
+                    ymax = max(dff_path['measurement'].max(), ymax) if not (ymax==None) else dff_path['measurement'].max()
+
+                    # creating graph
+                    plot.add_trace(go.Scatter(x=dff_path["date"],
+                                              y=dff_path["measurement"],
+                                              name=chosen_dsets[setIdx],
+                                              mode="lines+markers",
+                                              line={'color': color_list[setIdx % len(color_list)]},
+                                              marker={'color': ['red' if not pd.isna(a) else color_list[setIdx % len(color_list)] for a in dff_path['note']],
+                                                      'symbol': ['pentagon' if not pd.isna(a) else marker_list[setIdx % len(marker_list)] for a in dff_path['note']]},
+                                              hovertemplate=("Date: %{x}<br>" +
+                                                             "Measurement: %{y}<br>" +
+                                                             "GitSHA: %{customdata[0]}<br>" +
+                                                             "Note: %{customdata[1]}<extra></extra>"),
+                                              meta={"path": path},
+                                              showlegend=True if len(dfs) > 1 else False,
+                                              customdata=dff_path[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
+
+                    # add vertical lines for annotations
+                    for _, elem in dff_path[['date', 'note']].iterrows():
+                        if not pd.isna(elem['note']):
+                            plot.add_vline(x=elem['date'], line_width=1, line_dash='dot', line_color='green')
+
+                # It would not necessarily make sense to have the rolling
+                # average displayed when we have multiple lines on the graph
+                # and it would definitely cluter it so we only display it
+                # when a single dataset is selected for display.
+                if len(dfs) == 1:
 
                     # adds the rolling average line
                     df_for_avg = dff_path.copy()
@@ -437,39 +434,6 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
                                               line={'color': 'red'},
                                               hoverinfo='skip'))
 
-                    # add vertical lines for annotations
-                    for _, elem in dff_path[['date', 'note']].iterrows():
-                        if not pd.isna(elem['note']):
-                            plot.add_vline(x=elem['date'], line_width=1, line_dash='dot', line_color='green')
-                else:
-
-                    # add graph for second dataset
-                    second_dff_path = second_dff[second_dff["readable_path"] == path]
-                    plot.add_trace(go.Scatter(x=second_dff_path["date"],
-                                              y=second_dff_path["measurement"],
-                                              name=second_chosen_dset,
-                                              mode="lines+markers",
-                                              marker={'color': ['yellow' if not pd.isna(a) else 'red' for a in second_dff_path['note']],
-                                                      'symbol': ['square' if not pd.isna(a) else 'circle' for a in second_dff_path['note']]},
-                                              line={"color": 'red'},
-                                              hovertemplate=("Date: %{x}<br>" +
-                                                             "Measurement: %{y}<br>" +
-                                                             "GitSHA: %{customdata[0]}<br>" +
-                                                             "Note: %{customdata[1]}<extra></extra>"),
-                                              showlegend=True,
-                                              customdata=second_dff_path[["gitSHA", "truncated_note", "note", "prevGitSHA"]]))
-
-                # determine y range
-                MARGIN = 0.1
-                ymin = dff_path['measurement'].min()
-                ymax = dff_path['measurement'].max()
-                if have_second_dataset:
-                    ymin2 = second_dff_path['measurement'].min()
-                    ymax2 = second_dff_path['measurement'].max()
-                    if np.isfinite(ymin2):
-                        ymin = min(ymin, ymin2)
-                    if np.isfinite(ymax2):
-                        ymax = max(ymax, ymax2)
 
                 # Wrap the path for ease of reading
                 wrapped_path = path
@@ -533,16 +497,16 @@ def graph_creator(curr_depth, previous_path, df, second_df, chosen_dset, second_
 
     Input(component_id='annotation-submit', component_property='n_clicks'),
     State(component_id='annotation-input', component_property='value'),
-    State(component_id='dataset-selection', component_property='value'),
+    State(component_id='datasets-selection', component_property='value'),
     State(component_id='annotation-date-store', component_property='data'),
     State(component_id='current-stored-depth', component_property='data')
 )
-def annotation_submission(_, annotation_text, dataset_selection, annotation_date, depth_for_update):
+def annotation_submission(_, annotation_text, datasets_selection, annotation_date, depth_for_update):
     if annotation_text is None:
         return (False, depth_for_update)
     assert annotationsFile.exists()
     annotations_df = pd.read_csv(annotationsFile)
-    annotations_df.loc[len(annotations_df)] = [dataset_selection, annotation_date[:10], annotation_text]
+    annotations_df.loc[len(annotations_df)] = [datasets_selection[0], annotation_date[:10], annotation_text]
     annotations_df.to_csv(annotationsFile, index=False)
     return (False, depth_for_update)
 
@@ -551,18 +515,18 @@ def annotation_submission(_, annotation_text, dataset_selection, annotation_date
     Output(component_id='annotation-modal', component_property='is_open', allow_duplicate=True),
     Output(component_id='current-stored-depth', component_property='data', allow_duplicate=True),
     Input(component_id='annotation-delete', component_property='n_clicks'),
-    State(component_id='dataset-selection', component_property='value'),
+    State(component_id='datasets-selection', component_property='value'),
     State(component_id='annotation-date-store', component_property='data'),
     State(component_id='current-stored-depth', component_property='data')
 )
-def delete_annotations_button(_, dataset_selection, annotation_date, depth_for_update ):
+def delete_annotations_button(_, datasets_selection, annotation_date, depth_for_update ):
 
     assert annotationsFile.exists()
     df = pd.read_csv(annotationsFile)
     annotation_date_trunc = ''
     if annotation_date is not None:
         annotation_date_trunc = annotation_date[:10]
-    filtered_df = df.query("not (dataset_name == @dataset_selection and date_only == @annotation_date_trunc)")
+    filtered_df = df.query("not (dataset_name == @datasets_selection[0] and date_only == @annotation_date_trunc)")
     filtered_df.to_csv(annotationsFile, index=False)
     return (False, depth_for_update)
 
@@ -609,20 +573,16 @@ def display_click_data(click_data):
 # Navigation callbacks
 
 @callback(
-    State(component_id='dataset-selection', component_property='value'),
-    State(component_id='second-dataset-selection', component_property='value'),
+    State(component_id='datasets-selection', component_property='value'),
     Input(component_id='previous-path', component_property='data'),
     Input(component_id='do-display-btn', component_property='n_clicks'),
     Output(component_id='current-dataset', component_property='children'),
     Output(component_id='current-subtest', component_property='children'),
 )
-def show_current_dataset(dataset, second_dataset, path, _):
+def show_current_dataset(datasets, path, _):
     if path == "":
         path = "root level"
-    if second_dataset == "None":
-        return (f"Displayed dataset: {dataset}", f"Displayed subtest: {path}")
-    else:
-        return (f"Displayed datasets: {dataset}, {second_dataset}", f"Displayed subtest: {path}")
+    return (f"Displayed dataset(s): "+", ".join(datasets), f"Displayed subtest: {path}")
 
 
 @callback(
